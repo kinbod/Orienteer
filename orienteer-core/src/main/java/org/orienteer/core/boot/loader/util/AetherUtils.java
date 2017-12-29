@@ -23,6 +23,7 @@ import org.eclipse.aether.spi.connector.transport.TransporterFactory;
 import org.eclipse.aether.transport.file.FileTransporterFactory;
 import org.eclipse.aether.transport.http.HttpTransporterFactory;
 import org.eclipse.aether.util.graph.visitor.PreorderNodeListGenerator;
+import org.eclipse.aether.version.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -101,12 +102,32 @@ class AetherUtils {
         try {
             descriptorResult = system.readArtifactDescriptor(session, descriptorRequest);
         } catch (ArtifactDescriptorException e) {
-            if (LOG.isDebugEnabled()) e.printStackTrace();
+            if (LOG.isDebugEnabled()) LOG.debug(e.getMessage(), e);
         }
         Set<ArtifactRequest> requests = createArtifactRequests(descriptorResult);
         return resolveArtifactRequests(requests);
     }
 
+
+    public List<String> requestArtifactVersions(Artifact artifact) {
+        List<String> versions = Lists.newArrayList();
+        VersionRangeRequest rangeRequest = new VersionRangeRequest();
+        rangeRequest.setArtifact(artifact);
+        rangeRequest.setRepositories(repositories);
+        try {
+            VersionRangeResult versionResult = system.resolveVersionRange(session, rangeRequest);
+            if (!versionResult.getVersions().isEmpty()) {
+                String highest = versionResult.getHighestVersion().toString();
+                versions.add(highest);
+                for (Version version : versionResult.getVersions()) {
+                    if (!highest.equals(version.toString())) versions.add(version.toString());
+                }
+            }
+        } catch (VersionRangeResolutionException e) {
+            LOG.error("Can't create version request: {}", e);
+        }
+        return versions;
+    }
 
     /**
      * Download artifacts
@@ -207,7 +228,7 @@ class AetherUtils {
             result = system.resolveArtifact(session, request);
         } catch (ArtifactResolutionException e) {
             LOG.warn("Cannot resolve artifact: " + request.getArtifact());
-            if (LOG.isDebugEnabled()) e.printStackTrace();
+            if (LOG.isDebugEnabled()) LOG.debug(e.getMessage(), e);
         }
         return result;
     }
@@ -232,7 +253,7 @@ class AetherUtils {
             @Override
             public void serviceCreationFailed(Class<?> type, Class<?> impl, Throwable exception)
             {
-                exception.printStackTrace();
+            	LOG.error("ServiceLocator failed", exception);
             }
         });
 
@@ -267,7 +288,7 @@ class AetherUtils {
             descriptorResult = system.readArtifactDescriptor(session, request);
         } catch (ArtifactDescriptorException e) {
             LOG.warn("Can't get artifact description: {}", request);
-            if (LOG.isDebugEnabled()) e.printStackTrace();
+            if (LOG.isDebugEnabled()) LOG.debug(e.getMessage(), e);
         }
         return descriptorResult;
     }

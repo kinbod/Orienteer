@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.wicket.ajax.json.JSONArray;
+import org.apache.wicket.core.util.string.JavaScriptUtils;
 import org.apache.wicket.markup.head.CssReferenceHeaderItem;
 import org.apache.wicket.markup.head.IHeaderResponse;
 import org.apache.wicket.markup.head.JavaScriptReferenceHeaderItem;
@@ -12,8 +14,13 @@ import org.apache.wicket.markup.head.OnDomReadyHeaderItem;
 import org.apache.wicket.markup.html.panel.Panel;
 import org.apache.wicket.model.IModel;
 import org.apache.wicket.util.encoding.UrlEncoder;
+import org.apache.wicket.util.string.Strings;
 import org.apache.wicket.util.template.PackageTextTemplate;
 import org.apache.wicket.util.template.TextTemplate;
+import org.orienteer.core.util.CommonUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 
@@ -28,6 +35,7 @@ import de.agilecoders.wicket.webjars.request.resource.WebjarsJavaScriptResourceR
 public class TauchartsPanel extends Panel{
 
 	private static final long serialVersionUID = 1L;
+	private static final Logger LOG = LoggerFactory.getLogger(TauchartsPanel.class);
 	
 	private static final WebjarsJavaScriptResourceReference TAUCHARTS_JS = 
 			new WebjarsJavaScriptResourceReference("/webjars/github-com-TargetProcess-tauCharts/current/build/production/tauCharts.min.js");
@@ -56,13 +64,10 @@ public class TauchartsPanel extends Panel{
 	  response.render(CssReferenceHeaderItem.forReference(TAUCHARTS_CSS));
 	  
 		String jsonData=null;
-		String jsImpl = null;
 		String restUrl=null;
 		if (config.isUsingRest()){
-			jsImpl = "taucharts.rest.impl.js";
 			restUrl = "/orientdb/query/db/sql/"+UrlEncoder.PATH_INSTANCE.encode(config.getQuery(), "UTF-8")+"/-1?rnd="+Math.random();
 		}else{
-			jsImpl = "taucharts.impl.js";
 			List<ODocument> testData = new OSQLSynchQuery<ODocument>(config.getQuery()).run(getDefaultModelObject()!=null?((ODocument)getDefaultModelObject()).toMap():null) ;
 			jsonData = "[";
 			for ( ODocument object : testData) {
@@ -71,20 +76,22 @@ public class TauchartsPanel extends Panel{
 			jsonData+="]";
 		}
 
-	  	TextTemplate template = new PackageTextTemplate(TauchartsPanel.class, jsImpl);
+	  	TextTemplate template = new PackageTextTemplate(TauchartsPanel.class, "taucharts.tmpl.js");
 		Map<String, Object> params = new HashMap<String, Object>();
 		params.put("componentId", getMarkupId());
 		
+		params.put("rest", config.isUsingRest());
 		params.put("data",jsonData);
 		params.put("url",restUrl);
 		
 
-		params.put("type", config.getType());
-		params.put("x", config.getX());
-		params.put("xLabel", config.getxLabel().getObject());
-		params.put("y", config.getY());
-		params.put("yLabel", config.getyLabel().getObject());
-		params.put("colorBy", config.getColorBy());
+		params.put("type", CommonUtils.escapeStringForJSON(config.getType()));
+		params.put("x", new JSONArray(config.getX()).toString());
+		params.put("xLabel", CommonUtils.escapeStringForJSON(config.getxLabel().getObject()));
+		params.put("y", new JSONArray(config.getY()).toString());
+		params.put("yLabel", CommonUtils.escapeStringForJSON(config.getyLabel().getObject()));
+		params.put("colorBy", CommonUtils.escapeStringForJSON(config.getColorBy()));
+		params.put("config", CommonUtils.escapeStringForJSON(config.getConfig()));
 		String pluginStr ="[";
 		for ( String object : config.getPlugins()) {
 			pluginStr+="tauCharts.api.plugins.get('"+object+"')(),";	
@@ -96,8 +103,9 @@ public class TauchartsPanel extends Panel{
 		try {
 			template.close();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			LOG.error("Can't close a template resource", e);
 		}
 	}
+	
+	
 }

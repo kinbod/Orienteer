@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
 
 import org.apache.wicket.util.string.Strings;
 import org.orienteer.core.CustomAttribute;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Function;
 import com.google.common.collect.HashBasedTable;
@@ -21,6 +23,7 @@ import com.orientechnologies.orient.core.metadata.schema.OProperty;
 import com.orientechnologies.orient.core.metadata.schema.OSchema;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.OCommandSQLParsingException;
 import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
 
 /**
@@ -30,6 +33,7 @@ import com.orientechnologies.orient.core.sql.query.OSQLSynchQuery;
  */
 public class CalculablePropertiesHook extends ODocumentHookAbstract
 {
+	private static final Logger LOG = LoggerFactory.getLogger(CalculablePropertiesHook.class);
 	private final static Pattern FULL_QUERY_PATTERN = Pattern.compile("^\\s*(select|traverse)", Pattern.CASE_INSENSITIVE);
 	
 	private Map<String, Integer> schemaVersions = new ConcurrentHashMap<String, Integer>();
@@ -116,6 +120,7 @@ public class CalculablePropertiesHook extends ODocumentHookAbstract
 		onRecordAfterRead(iDocument);
 	}
 
+
 	@Override
 	public void onRecordAfterRead(ODocument iDocument) {
 		super.onRecordAfterRead(iDocument);
@@ -133,41 +138,48 @@ public class CalculablePropertiesHook extends ODocumentHookAbstract
 					String script = CustomAttribute.CALC_SCRIPT.getValue(property);
 					if(!Strings.isEmpty(script))
 					{
-						List<ODocument> calculated;
-						if(FULL_QUERY_PATTERN.matcher(script).find())
-						{
-							calculated = iDocument.getDatabase().query(new OSQLSynchQuery<Object>(script), iDocument);
-						}
-						else
-						{
-							script = "select "+script+" as value from "+iDocument.getIdentity();
-							calculated = iDocument.getDatabase().query(new OSQLSynchQuery<Object>(script));
-						}
-						if(calculated!=null && calculated.size()>0)
-						{
-							OType type = property.getType();
-							Object value;
-							if(type.isMultiValue())
+						try {
+							List<ODocument> calculated;
+							if(FULL_QUERY_PATTERN.matcher(script).find())
 							{
-								final OType linkedType = property.getLinkedType();
-								value = linkedType==null
-										?calculated
-										:Lists.transform(calculated, new Function<ODocument, Object>() {
-											
-											@Override
-											public Object apply(ODocument input) {
-												return OType.convert(input.field("value"), linkedType.getDefaultJavaType());
-											}
-										});
+								calculated = iDocument.getDatabase().query(new OSQLSynchQuery<Object>(script), iDocument);
 							}
 							else
 							{
-								value = calculated.get(0).field("value");
+								script = "select "+script+" as value from "+iDocument.getIdentity();
+								calculated = iDocument.getDatabase().query(new OSQLSynchQuery<Object>(script));
 							}
-							value = OType.convert(value, type.getDefaultJavaType());
-							iDocument.field(calcProperty, value);
+							if(calculated!=null && calculated.size()>0)
+							{
+								OType type = property.getType();
+								Object value;
+								if(type.isMultiValue())
+								{
+									final OType linkedType = property.getLinkedType();
+									value = linkedType==null
+											?calculated
+											:Lists.transform(calculated, new Function<ODocument, Object>() {
+												
+												@Override
+												public Object apply(ODocument input) {
+													return OType.convert(input.field("value"), linkedType.getDefaultJavaType());
+												}
+											});
+								}
+								else
+								{
+									value = calculated.get(0).field("value");
+								}
+								value = OType.convert(value, type.getDefaultJavaType());
+								Object oldValue = iDocument.field(calcProperty); 
+								if (oldValue!=value && (oldValue==null || !oldValue.equals(value))){
+									iDocument.field(calcProperty, value);
+								}
+							}
+						} catch (OCommandSQLParsingException e) { //TODO: Refactor because one exception prevent calculation for others
+							LOG.warn("Can't parse SQL for calculable property", e);
+							iDocument.field(calcProperty, e.getLocalizedMessage());
 						}
-						
 					}
 				}
 				

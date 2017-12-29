@@ -1,5 +1,12 @@
 package org.orienteer.core.tasks;
 
+import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
+import com.orientechnologies.orient.core.db.record.ORecordElement.STATUS;
+import com.orientechnologies.orient.core.exception.OConcurrentModificationException;
+import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.OCommandSQL;
+import com.orientechnologies.orient.core.type.ODocumentWrapper;
+import org.apache.wicket.model.Model;
 import org.orienteer.core.component.BootstrapType;
 import org.orienteer.core.component.FAIconType;
 import org.orienteer.core.method.ClassOMethod;
@@ -8,11 +15,9 @@ import org.orienteer.core.method.OFilter;
 import org.orienteer.core.method.filters.PlaceFilter;
 import org.orienteer.core.method.filters.WidgetTypeFilter;
 import org.orienteer.core.tasks.behavior.OTaskSessionInterruptBehavior;
-
-import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
-import com.orientechnologies.orient.core.record.impl.ODocument;
-import com.orientechnologies.orient.core.type.ODocumentWrapper;
-
+import org.orienteer.core.widget.AbstractWidget;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.ydn.wicket.wicketorientdb.utils.DBClosure;
 
 /**
@@ -20,6 +25,7 @@ import ru.ydn.wicket.wicketorientdb.utils.DBClosure;
  */
 public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 	private static final long serialVersionUID = 1L;
+	private static final Logger LOG = LoggerFactory.getLogger(OTaskSession.class);
 
 	///////////////////////////////////////////////////////////////////////
 	//OMethods
@@ -34,8 +40,12 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 		try {
 			interrupt();
 		} catch (Exception e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			AbstractWidget<?> widget = data.getCurrentWidget();
+			if(widget!=null) {
+				widget.error(widget.getLocalizer().getString("errors.session.cantinterupt", widget, Model.of(e.getMessage())));
+				
+			}
+			LOG.error("Can't interrupt the session", e);
 		}
 	}
 	///////////////////////////////////////////////////////////////////////
@@ -70,35 +80,100 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 	}
 	
 	private <V> V getField(ITaskSession.Field field, V defValue) {
-		V ret =  document.field(field.fieldName());
+		V ret =  getDocument().field(field.fieldName());
 		return ret!=null?ret:defValue;
 	}
 	
 	public <V> void persist() {
+		sudoSave();
+	}
+	
+	/**
+	 * @deprecated use  {@link setField} instead
+	 */
+	@Deprecated
+	public <V> void persist(final String field, final V value) {
+		setField(field,value);
+		/*
+		document.field(field, value);
+		if(document.getIdentity().isPersistent()) {
+			sudoSave();
+		}*/
+	}
+	
+	private void sudoSave(){
 		new DBClosure<Boolean>() {
-
 			@Override
 			protected Boolean execute(ODatabaseDocument db) {
-				db.save(document);
+				document.save();
+				if (document.getDatabase().getTransaction().isActive()){
+					document.getDatabase().commit();
+				}
+				return true;
+			}
+		}.execute();
+	}
+
+	public void atomicChange(final String field, final Object value,final String changeCommand){
+		new DBClosure<Boolean>() {
+			@Override
+			protected Boolean execute(ODatabaseDocument db) {
+				int maxRetries = 50;
+				OCommandSQL command = new OCommandSQL("update "+document.getIdentity()+" "+changeCommand);
+				int retry = 0;					
+				while(true){
+					try {
+						command.execute(value);
+						break;
+					} catch (OConcurrentModificationException  e) {
+						retry++;
+						try { Thread.sleep((long) (Math.random()*150));} catch (InterruptedException e1) {}
+						if (retry>=maxRetries){
+							throw e;//if all retries failed
+						}
+					}
+				}
+				document.reload();
 				return true;
 			}
 		}.execute();
 	}
 	
-	public <V> void persist(final String field, final V value) {
+	/**
+	 * Atomic set field value
+	 * @param field
+	 * @param value
+	 */
+	public <V> void setField(final String field, final V value){
+		document.field(field, value);
 		if(document.getIdentity().isPersistent()) {
-			new DBClosure<Boolean>() {
-	
-				@Override
-				protected Boolean execute(ODatabaseDocument db) {
-					document.field(field, value);
-					db.save(document);
-					return true;
-				}
-			}.execute();
-		} else {
-			document.field(field, value);
-		}
+			atomicChange(field,value,"SET "+field+"=?");
+		}		
+	}
+	/**
+	 * Atomic increment number field value
+	 * @param field
+	 * @param value
+	 */
+	public void incrementField(final String field, final Number value){
+		Number oldValue = document.field(field);
+		document.field(field, oldValue.doubleValue()+value.doubleValue());
+		if(document.getIdentity().isPersistent()) {
+			atomicChange(field,value,"INCREMENT "+field+"=?");
+		}		
+	}
+
+	/**
+	 * Atomic append string field value
+	 * @param field
+	 * @param value
+	 */
+	public void appendField(final String field, final String value){
+		String oldValue = document.field(field);
+		document.field(field, oldValue+value);
+		if(document.getIdentity().isPersistent()) {
+			atomicChange(field,value,"SET "+field+"=ifnull("+field+",'').append(?)");
+		}		
 	}
 
 	@Override
@@ -143,7 +218,7 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 
 	@Override
 	public ITaskSession setDeleteOnFinish(boolean deleteOnFinish) {
-		persist(Field.DELETE_ON_FINISH.fieldName(), deleteOnFinish);
+		setField(Field.DELETE_ON_FINISH.fieldName(), deleteOnFinish);
 		return this;
 	}
 
@@ -154,7 +229,7 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 
 	@Override
 	public ITaskSession setProgress(double progress) {
-		persist(Field.PROGRESS.fieldName(), progress);
+		setField(Field.PROGRESS.fieldName(), progress);
 		return this;
 	}
 
@@ -165,7 +240,7 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 
 	@Override
 	public ITaskSession setFinalProgress(double progress) {
-		persist(Field.PROGRESS_FINAL.fieldName(), progress);
+		setField(Field.PROGRESS_FINAL.fieldName(), progress);
 		return this;
 	}
 
@@ -176,7 +251,7 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 
 	@Override
 	public ITaskSession setCurrentProgress(double progress) {
-		persist(Field.PROGRESS_CURRENT.fieldName(), progress);
+		setField(Field.PROGRESS_CURRENT.fieldName(), progress);
 		return this;
 	}
 
@@ -187,8 +262,7 @@ public class OTaskSession extends ODocumentWrapper implements ITaskSession {
 	
 	@Override
 	public ITaskSession incrementCurrentProgress() {
-		setCurrentProgress(getCurrentProgress()+1);
+		incrementField(Field.PROGRESS_CURRENT.fieldName(), 1);
 		return this;
 	}
-
 }

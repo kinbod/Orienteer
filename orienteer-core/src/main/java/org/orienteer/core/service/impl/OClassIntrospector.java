@@ -4,7 +4,6 @@ import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Collections2;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.orientechnologies.common.collection.OCollection;
@@ -12,16 +11,12 @@ import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
 import com.orientechnologies.orient.core.metadata.schema.OProperty;
-import com.orientechnologies.orient.core.metadata.schema.OSchema;
 import com.orientechnologies.orient.core.metadata.schema.OType;
-import com.orientechnologies.orient.core.metadata.security.OSecurityShared;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.impl.ODocument;
-
 import org.apache.wicket.Application;
 import org.apache.wicket.extensions.markup.html.repeater.data.sort.SortOrder;
 import org.apache.wicket.extensions.markup.html.repeater.data.table.IColumn;
-import org.apache.wicket.extensions.markup.html.repeater.data.table.ISortableDataProvider;
 import org.apache.wicket.extensions.markup.html.repeater.util.SortableDataProvider;
 import org.apache.wicket.model.IModel;
 import org.apache.wicket.model.ResourceModel;
@@ -30,23 +25,17 @@ import org.orienteer.core.CustomAttribute;
 import org.orienteer.core.OrienteerWebApplication;
 import org.orienteer.core.OrienteerWebSession;
 import org.orienteer.core.component.property.DisplayMode;
-import org.orienteer.core.component.table.CheckBoxColumn;
-import org.orienteer.core.component.table.ODocumentClassColumn;
-import org.orienteer.core.component.table.OEntityColumn;
-import org.orienteer.core.component.table.OPropertyValueColumn;
-import org.orienteer.core.component.table.OUnknownEntityColumn;
+import org.orienteer.core.component.table.*;
 import org.orienteer.core.component.visualizer.IVisualizer;
+import org.orienteer.core.component.visualizer.LocalizationVisualizer;
 import org.orienteer.core.component.visualizer.UIVisualizersRegistry;
-import org.orienteer.core.module.OrienteerLocalizationModule;
 import org.orienteer.core.service.IOClassIntrospector;
 import org.orienteer.core.util.CommonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import ru.ydn.wicket.wicketorientdb.converter.ODocumentORIDConverter;
 import ru.ydn.wicket.wicketorientdb.model.ODocumentLinksDataProvider;
 import ru.ydn.wicket.wicketorientdb.model.OQueryDataProvider;
-import ru.ydn.wicket.wicketorientdb.proto.OClassPrototyper;
 import ru.ydn.wicket.wicketorientdb.proto.OPropertyPrototyper;
 
 import java.util.*;
@@ -111,12 +100,13 @@ public class OClassIntrospector implements IOClassIntrospector
 				if(nameProperty==null || !nameProperty.equals(oProperty))
 				{
 					Class<?> javaType = oProperty.getType().getDefaultJavaType();
-					if(javaType!=null && Comparable.class.isAssignableFrom(javaType))
-					{
+					if(javaType!=null && Comparable.class.isAssignableFrom(javaType)) {
 						columns.add(new OPropertyValueColumn(oProperty.getName(), oProperty, modeModel));
-					}
-					else
-					{
+					} else if (LocalizationVisualizer.NAME.equals(CustomAttribute.VISUALIZATION_TYPE.getValue(oProperty))) {
+						columns.add(new OPropertyValueColumn(
+								String.format("%s['%s']", oProperty.getName(),
+										OrienteerWebSession.get().getLocale().getLanguage()), oProperty, modeModel));
+					} else {
 						columns.add(new OPropertyValueColumn(oProperty, modeModel));
 					}
 				}
@@ -269,33 +259,41 @@ public class OClassIntrospector implements IOClassIntrospector
 		if(doc==null) return Application.get().getResourceSettings().getLocalizer().getString("nodoc", null);
 		else
 		{
+			String ret = null;
 			if(nameProp==null) nameProp = getNameProperty(doc.getSchemaClass());
 			if(nameProp!=null)
 			{
 				Object value = doc.field(nameProp.getName());
-				if(value==null) return Application.get().getResourceSettings().getLocalizer().getString("noname", null);
-				OType type = nameProp.getType();
-				Locale locale = OrienteerWebSession.get().getLocale();
-				switch (type)
-				{
-					case DATE:
-						return OrienteerWebApplication.DATE_CONVERTER.convertToString((Date)value, locale);
-					case DATETIME:
-						return OrienteerWebApplication.DATE_TIME_CONVERTER.convertToString((Date)value, locale);
-					case LINK:
-						return value instanceof ODocument?getDocumentName((ODocument)value):null;
-					case EMBEDDEDMAP:
-						Map<String, Object> localizations = (Map<String, Object>)value;
-						Object localized = CommonUtils.localizeByMap(localizations, true, locale.getLanguage(), Locale.getDefault().getLanguage());
-						if(localized!=null) return localized.toString();
-					default:
-						return value.toString();
+				if(value!=null) {
+					OType type = nameProp.getType();
+					Locale locale = OrienteerWebSession.get().getLocale();
+					switch (type)
+					{
+						case DATE:
+							ret = OrienteerWebApplication.DATE_CONVERTER.convertToString((Date)value, locale);
+							break;
+						case DATETIME:
+							ret = OrienteerWebApplication.DATE_TIME_CONVERTER.convertToString((Date)value, locale);
+							break;
+						case LINK:
+							ret =  value instanceof ODocument?getDocumentName((ODocument)value):null;
+							break;
+						case EMBEDDEDMAP:
+							Map<String, Object> localizations = (Map<String, Object>)value;
+							Object localized = CommonUtils.localizeByMap(localizations, true, locale.getLanguage(), Locale.getDefault().getLanguage());
+							ret = localized!=null ? localized.toString() : value.toString();
+							break;
+						default:
+							ret =  value.toString();
+							break;
+					}
 				}
 			}
 			else
 			{
-				return doc.toString();
+				ret = doc.toString();
 			}
+			return !Strings.isEmpty(ret) ? ret : Application.get().getResourceSettings().getLocalizer().getString("noname", null);
 		}
 	}
 	

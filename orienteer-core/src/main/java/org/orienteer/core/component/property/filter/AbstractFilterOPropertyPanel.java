@@ -4,6 +4,9 @@ import com.google.common.collect.Lists;
 import org.apache.wicket.AttributeModifier;
 import org.apache.wicket.Component;
 import org.apache.wicket.ajax.AjaxRequestTarget;
+import org.apache.wicket.ajax.attributes.AjaxCallListener;
+import org.apache.wicket.ajax.attributes.AjaxRequestAttributes;
+import org.apache.wicket.ajax.form.AjaxFormSubmitBehavior;
 import org.apache.wicket.ajax.markup.html.AjaxFallbackLink;
 import org.apache.wicket.ajax.markup.html.form.AjaxSubmitLink;
 import org.apache.wicket.markup.ComponentTag;
@@ -46,21 +49,86 @@ public abstract class AbstractFilterOPropertyPanel extends Panel {
 
     private final String containerId;
 
-    private String currentTabId;
+    private FilterTab currentTab;
 
     public AbstractFilterOPropertyPanel(String id, IModel<String> name, final Form form) {
         super(id);
         final List<AbstractFilterPanel> filterPanels = Lists.newArrayList();
-        createFilterPanels(filterPanels);
         final WebMarkupContainer container = new WebMarkupContainer("container");
         this.containerId = container.getMarkupId();
+        initFilterPanels(filterPanels);
         List<FilterTab> tabs = createPanelSwitches("switch", filterPanels);
+        currentTab = tabs.get(0);
         addFilterPanels(container, filterPanels, tabs);
         addFilterSwitches(container, tabs);
         container.setOutputMarkupPlaceholderTag(true);
         container.setVisible(false);
         container.add(newOkButton("okButton", container, form));
-        container.add(new AjaxFormCommand<Void>("clearButton", "widget.document.filter.clear") {
+        container.add(newClearButton("clearButton", container, form, filterPanels));
+        container.add(newOnEnterPressBehavior(container));
+        add(newShowFilterButton("showFilters", container));
+        container.add(new Label("panelTitle", name).setOutputMarkupPlaceholderTag(true));
+        add(container);
+        setOutputMarkupPlaceholderTag(true);
+    }
+
+    private void initFilterPanels(List<AbstractFilterPanel> filterPanels) {
+        createFilterPanels(filterPanels);
+        for (AbstractFilterPanel panel : filterPanels) {
+            panel.setContainerId(this.containerId);
+        }
+    }
+
+    protected abstract void createFilterPanels(List<AbstractFilterPanel> filterPanels);
+
+    private AjaxFormSubmitBehavior newOnEnterPressBehavior(final WebMarkupContainer container) {
+        return new AjaxFormSubmitBehavior("keypress") {
+
+            @Override
+            protected void updateAjaxAttributes(AjaxRequestAttributes attributes) {
+                super.updateAjaxAttributes(attributes);
+                attributes.getAjaxCallListeners().add(new AjaxCallListener() {
+                    @Override
+                    public CharSequence getPrecondition(Component component) {
+                        return "return Wicket.Event.keyCode(attrs.event) === 13;";
+                    }
+                });
+            }
+
+            @Override
+            protected void onSubmit(AjaxRequestTarget target) {
+                super.onSubmit(target);
+                onOkSubmit(target, container);
+            }
+        };
+    }
+
+    private AjaxFormCommand<Void> newOkButton(String id, final WebMarkupContainer container, final Form form) {
+        return new AjaxFormCommand<Void>(id, Model.of("OK")) {
+            @Override
+            protected AbstractLink newLink(String id) {
+                return new AjaxSubmitLink(id, form) {
+
+                    @Override
+                    protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
+                        onOkSubmit(target, container);
+                    }
+                };
+            }
+
+            @Override
+            protected void onInstantiation() {
+                super.onInstantiation();
+                setBootstrapType(BootstrapType.PRIMARY);
+                setBootstrapSize(BootstrapSize.SMALL);
+                setIcon(FAIconType.check);
+            }
+        };
+    }
+
+    private AjaxFormCommand<Void> newClearButton(String id, final WebMarkupContainer container, final Form form,
+                                                 final List<AbstractFilterPanel> filterPanels) {
+        return new AjaxFormCommand<Void>(id, "widget.document.filter.clear") {
             @Override
             protected AbstractLink newLink(String id) {
                 return new AjaxSubmitLink(id, form) {
@@ -81,45 +149,28 @@ public abstract class AbstractFilterOPropertyPanel extends Panel {
                 setBootstrapType(BootstrapType.DANGER);
                 setIcon(FAIconType.trash);
             }
-        });
-        add(new AjaxFallbackLink<Void>("showFilters") {
-            @Override
-            public void onClick(AjaxRequestTarget target) {
-                container.setVisible(!container.isVisible());
-                target.add(container);
-                target.appendJavaScript(enableDraggableJs(containerId));
-            }
-        });
-        container.add(new Label("panelTitle", name).setOutputMarkupPlaceholderTag(true));
-        add(container);
-        setOutputMarkupPlaceholderTag(true);
+        };
     }
 
-    protected abstract void createFilterPanels(List<AbstractFilterPanel> filterPanels);
+    private void onOkSubmit(AjaxRequestTarget target, WebMarkupContainer container) {
+        container.setVisible(false);
+        target.add(container);
+        target.appendJavaScript(removeFilterJs(containerId));
+    }
 
-    private Component newOkButton(String id, final WebMarkupContainer container, final Form form) {
-        Component button = new AjaxFormCommand<Void>(id, Model.of("OK")) {
+    private AjaxFallbackLink<Void> newShowFilterButton(String id, final WebMarkupContainer container) {
+        return new AjaxFallbackLink<Void>(id) {
             @Override
-            protected AbstractLink newLink(String id) {
-                return new AjaxSubmitLink(id, form) {
-
-                    @Override
-                    protected void onSubmit(AjaxRequestTarget target, Form<?> form) {
-                        container.setVisible(false);
-                        target.add(container);
-                    }
-                };
-            }
-
-            @Override
-            protected void onInstantiation() {
-                super.onInstantiation();
-                setBootstrapType(BootstrapType.PRIMARY);
-                setBootstrapSize(BootstrapSize.SMALL);
-                setIcon(FAIconType.check);
+            public void onClick(AjaxRequestTarget target) {
+                boolean visible = !container.isVisible();
+                container.setVisible(visible);
+                target.add(container);
+                if (visible) {
+                    target.appendJavaScript(initFilterJs(containerId, currentTab != null ? currentTab.getMarkupId() : null));
+                    if (currentTab != null) currentTab.getPanel().focus(target);
+                } else target.appendJavaScript(removeFilterJs(containerId));
             }
         };
-        return button;
     }
 
     private void addFilterPanels(WebMarkupContainer container, List<AbstractFilterPanel> panels, final List<FilterTab> tabs) {
@@ -172,11 +223,9 @@ public abstract class AbstractFilterOPropertyPanel extends Panel {
         for (AbstractFilterPanel panel : panels) {
             if (panel == null)
                 continue;
-            final FilterCriteriaType type = panel.getFilterCriteriaType();
-            FilterTab tab = new FilterTab(id, type);
-            tab.setBody(new ResourceModel(String.format(TAB_NAME_TEMPLATE, type.getName())));
+            FilterTab tab = new FilterTab(id, panel);
+            tab.setBody(new ResourceModel(String.format(TAB_NAME_TEMPLATE, panel.getFilterCriteriaType().getName())));
             switches.add(tab);
-
         }
         return switches;
     }
@@ -188,17 +237,20 @@ public abstract class AbstractFilterOPropertyPanel extends Panel {
                 new JavaScriptResourceReference(AbstractFilterOPropertyPanel.class, "filter.js")));
         response.render(CssHeaderItem.forReference(
                 new CssResourceReference(AbstractFilterOPropertyPanel.class, "filter.css")));
-        response.render(OnDomReadyHeaderItem.forScript(enableDraggableJs(containerId)));
-        if (currentTabId != null)
-                response.render(OnDomReadyHeaderItem.forScript(showTabJs(currentTabId)));
+        response.render(OnDomReadyHeaderItem.forScript(initFilterJs(containerId, currentTab != null ? currentTab.getMarkupId() : null)));
     }
 
-    private String enableDraggableJs(String id) {
-        return String.format("; enableDraggable('%s');", id);
+    private String initFilterJs(String containerId, String tabId) {
+        return tabId != null ? String.format("initFilter('%s', '%s');", containerId, tabId) :
+                String.format("initFilter('%s');", containerId);
     }
 
-    private String showTabJs(String id) {
-        return String.format("; showTab('%s')", id);
+    private String showTabJs(String containerId, String id) {
+        return String.format("switchFilterTab('%s', '%s')", containerId, id);
+    }
+
+    private String removeFilterJs(String id) {
+        return String.format("removeFilter('%s');", id);
     }
 
     /**
@@ -206,23 +258,28 @@ public abstract class AbstractFilterOPropertyPanel extends Panel {
      */
     private class FilterTab extends AjaxFallbackLink<Void> {
 
-        private final FilterCriteriaType type;
+        private final AbstractFilterPanel panel;
         private String tabId;
 
-        public FilterTab(String id, FilterCriteriaType type) {
+        public FilterTab(String id, AbstractFilterPanel panel) {
             super(id);
-            this.type = type;
+            this.panel = panel;
             setOutputMarkupId(true);
         }
 
         @Override
         public void onClick(AjaxRequestTarget target) {
-            currentTabId = getMarkupId();
-            target.appendJavaScript(showTabJs(currentTabId));
+            currentTab = this;
+            panel.focus(target);
+            target.appendJavaScript(showTabJs(containerId, currentTab.getMarkupId()));
+        }
+
+        public AbstractFilterPanel getPanel() {
+            return panel;
         }
 
         public FilterCriteriaType getType() {
-            return type;
+            return panel.getFilterCriteriaType();
         }
 
         public void setTabId(String tabId) {

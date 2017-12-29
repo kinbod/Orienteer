@@ -2,6 +2,7 @@ package org.orienteer.core.component.property.date;
 
 import com.google.common.base.Strings;
 import org.apache.wicket.Component;
+import org.apache.wicket.datetime.PatternDateConverter;
 import org.apache.wicket.datetime.StyleDateConverter;
 import org.apache.wicket.datetime.markup.html.form.DateTextField;
 import org.apache.wicket.extensions.yui.calendar.DatePicker;
@@ -42,11 +43,14 @@ public class DateTimeBootstrapField extends DateTimeField {
     protected void onInitialize() {
         super.onInitialize();
         setOutputMarkupId(true);
+        get(DATE).setOutputMarkupId(true);
+        get(HOURS).setOutputMarkupId(true);
+        get(MINUTES).setOutputMarkupId(true);
     }
 
     @Override
     protected DateTextField newDateTextField(String id, PropertyModel<Date> model) {
-        DateTextField dateTextField = DateTextField.forDatePattern(id, model, createJavaDateFormat());
+        DateTextField dateTextField = new DateTextField(id, model, new PatternDateConverter(createJavaDateFormat(), false));
         dateTextField.setOutputMarkupId(true);
         return dateTextField;
     }
@@ -87,7 +91,7 @@ public class DateTimeBootstrapField extends DateTimeField {
             public void beforeRender(Component component) {
                 Response response = component.getResponse();
                 response.write(String.format(
-                        "<div id='%s' class='input-group date' data-provide='datepicker'>", datePickerId));
+                        "<div id='%s' class='input-group date' data-provide='datepicker' style='width:200px;'>", datePickerId));
             }
 
             @Override
@@ -100,7 +104,7 @@ public class DateTimeBootstrapField extends DateTimeField {
 
             @Override
             public void renderHead(Component component, IHeaderResponse response) {
-                String jqueryInit = String.format("; initJQDatepicker('%s', %s);", datePickerId,
+                String jqueryInit = String.format("initJQDatepicker('%s', %s);", datePickerId,
                         getDatePickerParams().toString());
                 response.render(OnDomReadyHeaderItem.forScript(jqueryInit));
             }
@@ -114,7 +118,7 @@ public class DateTimeBootstrapField extends DateTimeField {
         response.render(CssHeaderItem.forReference(new CssResourceReference(DateTimeBootstrapField.class, "datetime.css")));
         super.renderHead(response);
 
-        response.render(OnDomReadyHeaderItem.forScript(String.format("; initDateMarkup('%s')", getMarkupId())));
+        response.render(OnDomReadyHeaderItem.forScript(String.format("initDateMarkup('%s')", getMarkupId())));
     }
 
     private Map<String, String> getDatePickerParams() {
@@ -178,5 +182,20 @@ public class DateTimeBootstrapField extends DateTimeField {
                 return sb.toString();
             }
         };
+    }
+
+    public String getDateMarkupId() {
+        Component date = get(DATE);
+        return date.getMarkupId();
+    }
+
+    public String getHoursMarkupId() {
+        Component hours = get(HOURS);
+        return hours.getMarkupId();
+    }
+
+    public String getMinutesMarkupId() {
+        Component minutes = get(MINUTES);
+        return minutes.getMarkupId();
     }
 }

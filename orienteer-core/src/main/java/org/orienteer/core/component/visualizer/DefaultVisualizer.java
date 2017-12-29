@@ -34,10 +34,9 @@ import java.util.*;
 /**
  * Default {@link IVisualizer}. Should cover all property types
  */
-public class DefaultVisualizer extends AbstractSimpleVisualizer
-{
+public class DefaultVisualizer extends AbstractSimpleVisualizer {
 	public static final DefaultVisualizer INSTANCE = new DefaultVisualizer();
-	
+
 	public DefaultVisualizer()
 	{
 		super("default", false, OType.values());
@@ -62,7 +61,7 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
 					return new LinkViewPanel(id, (IModel<ODocument>)valueModel);
 				case LINKLIST:
 				case LINKSET:
-					return new LinksCollectionViewPanel<OIdentifiable, Collection<OIdentifiable>>(id, documentModel, property);
+					return new LinksCollectionViewPanel<>(id, documentModel, property);
                 case DATE:
                 	return new DateLabel(id, (IModel<Date>) valueModel, OrienteerWebApplication.DATE_CONVERTER);
                 case DATETIME:
@@ -73,8 +72,9 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
                 	return new EmbeddedDocumentPanel(id, (IModel<ODocument>)valueModel, new PropertyModel<OClass>(propertyModel, "linkedClass"), mode.asModel());
                 case EMBEDDEDLIST:
                 case EMBEDDEDSET:
-                	return new EmbeddedCollectionViewPanel<Object, Collection<Object>>(id, documentModel, propertyModel);
+                	return new EmbeddedCollectionViewPanel<>(id, documentModel, propertyModel);
                 case EMBEDDEDMAP:
+                case LINKMAP:
                 	return new EmbeddedMapViewPanel<V>(id, documentModel, propertyModel);
                 case BINARY:
                 	return new BinaryViewPanel(id, documentModel, propertyModel, valueModel);
@@ -89,11 +89,11 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
 				case BOOLEAN:
 					return new CheckBox(id, (IModel<Boolean>)valueModel);
 				case LINK:
-					return new LinkEditPanel(id, documentModel, propertyModel);
+					return new LinkEditPanel(id, documentModel, propertyModel, (IModel<OIdentifiable>)valueModel);
 					//return new TextField<V>(id, getModel()).setType(ODocument.class);
 				case LINKLIST:
 				case LINKSET:
-					return new LinksCollectionEditPanel<OIdentifiable, Collection<OIdentifiable>>(id, documentModel, property);
+					return new LinksCollectionEditPanel<>(id, documentModel, property);
                 case DATE:
 					return new DateBootstrapField(id, (IModel<Date>) valueModel);
                 case DATETIME:
@@ -105,6 +105,7 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
                 case EMBEDDEDSET:
                 	return new EmbeddedCollectionEditPanel<Object, Set<Object>>(id, documentModel, propertyModel, HashSet.class);
                 case EMBEDDEDMAP:
+                case LINKMAP:
                 	return new EmbeddedMapEditPanel<V>(id, documentModel, propertyModel);
                 case BINARY:
                 	return new BinaryEditPanel(id, documentModel, propertyModel, (IModel<byte[]>)valueModel);
@@ -135,18 +136,24 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
 		final IFilterCriteriaManager manager = getManager(propertyModel, filterForm);
 		Component component;
 		OProperty property = propertyModel.getObject();
-		OType type = property.getType();
+		final OType type = property.getType();
 		switch (type) {
-			case EMBEDDED:
-			case EMBEDDEDMAP:
-			case EMBEDDEDLIST:
-			case EMBEDDEDSET:
 			case LINKBAG:
-			case LINKMAP:
 			case TRANSIENT:
 			case BINARY:
 			case ANY:
 				component = null;
+				break;
+			case EMBEDDED:
+				component = new AbstractFilterOPropertyPanel(id, new OPropertyNamingModel(propertyModel), filterForm) {
+					@Override
+					protected void createFilterPanels(List<AbstractFilterPanel> filterPanels) {
+						filterPanels.add(new EmbeddedContainsValuePanel(AbstractFilterOPropertyPanel.PANEL_ID, Model.of(),
+								id, propertyModel, DefaultVisualizer.this, manager));
+						filterPanels.add(new EmbeddedContainsKeyPanel(AbstractFilterOPropertyPanel.PANEL_ID, Model.of(),
+								id, propertyModel, DefaultVisualizer.this, manager));
+					}
+				};
 				break;
 			case LINK:
 				component = new AbstractFilterOPropertyPanel(id, new OPropertyNamingModel(propertyModel), filterForm) {
@@ -159,12 +166,45 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
 					}
 				};
 				break;
+			case EMBEDDEDLIST:
+			case EMBEDDEDSET:
+				component = new AbstractFilterOPropertyPanel(id, new OPropertyNamingModel(propertyModel), filterForm) {
+					@Override
+					protected void createFilterPanels(List<AbstractFilterPanel> filterPanels) {
+						OProperty prop = propertyModel.getObject();
+						if (prop != null) {
+							if (prop.getLinkedType() != null) {
+								filterPanels.add(new EmbeddedCollectionContainsFilterPanel(AbstractFilterOPropertyPanel.PANEL_ID, Model.of(),
+										id, propertyModel, DefaultVisualizer.this, manager));
+							} else {
+								filterPanels.add(new EmbeddedCollectionFilterPanel(AbstractFilterOPropertyPanel.PANEL_ID, new CollectionModel<String>(),
+										id, propertyModel, DefaultVisualizer.this, manager, true));
+							}
+						}
+					}
+				};
+				break;
 			case LINKLIST:
 			case LINKSET:
 				component = new AbstractFilterOPropertyPanel(id, new OPropertyNamingModel(propertyModel), filterForm) {
 					@Override
 					protected void createFilterPanels(List<AbstractFilterPanel> filterPanels) {
 						filterPanels.add(new CollectionLinkFilterPanel(AbstractFilterOPropertyPanel.PANEL_ID, new CollectionModel<ODocument>(),
+								id, propertyModel, DefaultVisualizer.this, manager));
+					}
+				};
+				break;
+			case EMBEDDEDMAP:
+			case LINKMAP:
+				component = new AbstractFilterOPropertyPanel(id, new OPropertyNamingModel(propertyModel), filterForm) {
+					@Override
+					protected void createFilterPanels(List<AbstractFilterPanel> filterPanels) {
+						filterPanels.add(new MapContainsKeyFilterPanel(AbstractFilterOPropertyPanel.PANEL_ID, Model.<String>of(),
+								id, propertyModel, DefaultVisualizer.this, manager));
+						if (type == OType.EMBEDDEDMAP) {
+							filterPanels.add(new EmbeddedMapContainsValueFilterPanel(AbstractFilterOPropertyPanel.PANEL_ID, Model.of(),
+									id, propertyModel, DefaultVisualizer.this, manager));
+						} else filterPanels.add(new LinkMapContainsValueFilterPanel(AbstractFilterOPropertyPanel.PANEL_ID, Model.<ODocument>of(),
 								id, propertyModel, DefaultVisualizer.this, manager));
 					}
 				};
@@ -190,10 +230,6 @@ public class DefaultVisualizer extends AbstractSimpleVisualizer
 								id, propertyModel, DefaultVisualizer.this, manager));
 					}
 				};
-				break;
-			case DATE:
-			case DATETIME:
-				component = null;
 				break;
 			default:
 				component = new AbstractFilterOPropertyPanel(id, new OPropertyNamingModel(propertyModel), filterForm) {

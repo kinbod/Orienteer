@@ -5,10 +5,10 @@ import com.google.inject.Inject;
 import com.orientechnologies.orient.core.metadata.schema.OProperty;
 import org.apache.wicket.AttributeModifier;
 import org.apache.wicket.Component;
+import org.apache.wicket.ajax.AjaxRequestTarget;
 import org.apache.wicket.markup.IMarkupFragment;
 import org.apache.wicket.markup.html.WebMarkupContainer;
 import org.apache.wicket.markup.html.basic.Label;
-import org.apache.wicket.markup.html.form.Form;
 import org.apache.wicket.markup.html.form.FormComponent;
 import org.apache.wicket.markup.html.list.ListItem;
 import org.apache.wicket.markup.html.list.ListView;
@@ -20,7 +20,6 @@ import org.orienteer.core.service.IMarkupProvider;
 import ru.ydn.wicket.wicketorientdb.utils.query.filter.FilterCriteriaType;
 import ru.ydn.wicket.wicketorientdb.utils.query.filter.IFilterCriteriaManager;
 
-import java.util.Collection;
 import java.util.List;
 
 /**
@@ -28,7 +27,7 @@ import java.util.List;
  * SELECT FROM aClass WHERE a BETWEEN value1 AND value2
  * @param <T> type of value
  */
-public class RangeFilterPanel<T> extends AbstractFilterPanel<Collection<T>> {
+public class RangeFilterPanel<T> extends AbstractFilterPanel<List<T>> {
 
     @Inject
     private IMarkupProvider markupProvider;
@@ -36,17 +35,14 @@ public class RangeFilterPanel<T> extends AbstractFilterPanel<Collection<T>> {
     private FormComponent<T> startComponent;
     private FormComponent<T> endComponent;
 
-    public RangeFilterPanel(String id, IModel<Collection<T>> model, String filterId, IModel<OProperty> propertyModel,
+    @SuppressWarnings("unchecked")
+    public RangeFilterPanel(String id, IModel<List<T>> model, String filterId, IModel<OProperty> propertyModel,
                             IVisualizer visualizer, IFilterCriteriaManager manager) {
         super(id, model, filterId, propertyModel, visualizer, manager, Model.of(true));
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    protected void onInitialize() {
-        super.onInitialize();
         startComponent = (FormComponent<T>) createFilterComponent(Model.of());
         endComponent = (FormComponent<T>) createFilterComponent(Model.of());
+        startComponent.setOutputMarkupId(true);
+        endComponent.setOutputMarkupId(true);
         List<Component> rangeContainers = Lists.newArrayList();
         rangeContainers.add(getRangeContainer(startComponent, getFilterId(), true));
         rangeContainers.add(getRangeContainer(endComponent, getFilterId(), false));
@@ -61,11 +57,16 @@ public class RangeFilterPanel<T> extends AbstractFilterPanel<Collection<T>> {
     }
 
     @Override
-    public void convertInput() {
-        Collection<T> collection = Lists.newArrayList();
+    protected List<T> getFilterInput() {
+        List<T> collection = Lists.newArrayList();
         collection.add(startComponent.getConvertedInput());
         collection.add(endComponent.getConvertedInput());
-        setConvertedInput(collection);
+        return collection;
+    }
+
+    @Override
+    protected void focus(AjaxRequestTarget target) {
+        target.focusComponent(startComponent);
     }
 
     private WebMarkupContainer getRangeContainer(final Component component, final String filterId, boolean first) {
@@ -87,7 +88,7 @@ public class RangeFilterPanel<T> extends AbstractFilterPanel<Collection<T>> {
 
 
     @Override
-    protected void setFilterCriteria(IFilterCriteriaManager manager, FilterCriteriaType type, IModel<Collection<T>> models) {
+    protected void setFilterCriteria(IFilterCriteriaManager manager, FilterCriteriaType type, IModel<List<T>> models) {
         manager.addFilterCriteria(manager.createRangeFilterCriteria(models, getJoinModel()));
     }
 
@@ -98,6 +99,8 @@ public class RangeFilterPanel<T> extends AbstractFilterPanel<Collection<T>> {
 
     @Override
     protected void clearInputs() {
+        startComponent.setConvertedInput(null);
+        endComponent.setConvertedInput(null);
         startComponent.setModelObject(null);
         endComponent.setModelObject(null);
     }

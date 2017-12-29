@@ -15,7 +15,6 @@ import org.orienteer.core.component.FAIconType;
 import org.orienteer.core.component.property.DisplayMode;
 import org.orienteer.core.component.table.ODocumentDescriptionColumn;
 import org.orienteer.core.component.table.OEntityColumn;
-import org.orienteer.core.component.table.OrienteerDataTable;
 import org.orienteer.core.component.table.component.GenericTablePanel;
 import org.orienteer.core.model.ODocumentNameModel;
 import org.orienteer.core.service.impl.OClassIntrospector;
@@ -24,11 +23,27 @@ import org.orienteer.core.widget.Widget;
 import ru.ydn.wicket.wicketorientdb.behavior.DisableIfDocumentNotSavedBehavior;
 import ru.ydn.wicket.wicketorientdb.model.OQueryDataProvider;
 
+import java.io.Serializable;
+
 /**
  * Widget for displaying vertices of graph edge.
  */
 @Widget(id="vertices", domain="document", order=10, autoEnable=true, selector="E")
 public class GraphVerticesWidget extends AbstractWidget<ODocument> {
+	
+	private class DirectionLocalizer implements Function<ODocument, String>, Serializable {
+
+		@Override
+		public String apply(ODocument vertex) {
+			Object fieldIn = getModelObject().field("in");
+            String direction;
+			if (fieldIn != null) {
+                direction = ((OIdentifiable)fieldIn).getIdentity().equals(vertex.getIdentity()) ? "in":"out";
+            } else direction = "empty";
+            return getLocalizer().getString("widget.document.vertices.title." + direction, GraphVerticesWidget.this);
+		}
+		
+	}
 
     @Inject
     private OClassIntrospector oClassIntrospector;
@@ -41,26 +56,15 @@ public class GraphVerticesWidget extends AbstractWidget<ODocument> {
         OProperty nameProperty = oClassIntrospector.getNameProperty(getModelObject().getSchemaClass());
         OEntityColumn entityColumn = new OEntityColumn(nameProperty, true, modeModel);
 
-        Function<ODocument, String> directionLocalizer = new Function<ODocument, String>() {
-            @Override
-            public String apply(ODocument vertex) {
-            	Object fieldIn =  model.getObject().field("in");
-                String direction = ((OIdentifiable)fieldIn).getIdentity().equals(vertex.getIdentity()) ? "in":"out";
-                return getLocalizer().getString("widget.document.vertices.title." + direction, GraphVerticesWidget.this);
-            }
-        };
-
         ODocumentDescriptionColumn directionColumn = new ODocumentDescriptionColumn(
                 new StringResourceModel("property.direction", this, Model.of()),
-                directionLocalizer);
-        OQueryDataProvider<ODocument> provider = new OQueryDataProvider<>("select from [" +
-                ((OIdentifiable) model.getObject().field("in")).getIdentity() + "," +
-                ((OIdentifiable) model.getObject().field("out")).getIdentity() + "]");
-        GenericTablePanel<ODocument> tablePanel = new GenericTablePanel<ODocument>("vertices",
+                new DirectionLocalizer());
+
+        OQueryDataProvider<ODocument> provider = new OQueryDataProvider<>("select expand(bothV()) from " + model.getObject().getIdentity());
+        GenericTablePanel<ODocument> tablePanel = new GenericTablePanel<>("vertices",
                 Lists.newArrayList(entityColumn, directionColumn),
                 provider,//setParameter does not work here
                 2);
-        OrienteerDataTable<ODocument, String> table = tablePanel.getDataTable();
         add(tablePanel);
         add(DisableIfDocumentNotSavedBehavior.INSTANCE,UpdateOnActionPerformedEventBehavior.INSTANCE_ALL_CONTINUE);
     }
@@ -73,5 +77,10 @@ public class GraphVerticesWidget extends AbstractWidget<ODocument> {
     @Override
     protected IModel<String> getDefaultTitleModel() {
         return new StringResourceModel("widget.document.vertices.title", new ODocumentNameModel(getModel()));
+    }
+    
+    @Override
+    protected String getWidgetStyleClass() {
+    	return "strict";
     }
 }
